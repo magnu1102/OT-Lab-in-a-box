@@ -37,6 +37,19 @@ docker compose build plc-simulator
 docker compose up -d plc-simulator
 ```
 
+## Run the smoke test
+
+With the stack already running:
+
+```bash
+./scripts/smoke-test.sh
+```
+
+The smoke test validates the host-facing HMI, simulator scenario endpoint,
+historian readback, Prometheus alert rules, Grafana reachability, and
+corporate-client segmentation self-test logs. It resets the simulator to
+the normal scenario before exiting.
+
 ## Inspect logs
 
 ```bash

@@ -232,7 +232,8 @@ Prometheus loads rule files from `config/prometheus/rules/`:
 There is no Alertmanager in this phase. Alerts are inspected through
 Grafana Explore or Prometheus APIs from inside the monitoring zone.
 
-## What changes in later phases
+## Potential later enhancements
 
-- **Phase 6**: portfolio polish — screenshots, demo flow, smoke-test
-  script, GitHub Actions CI.
+- Richer safe simulator scenarios.
+- CI-driven full-stack smoke tests if runtime remains reasonable.
+- Additional observability views when they clarify the educational story.

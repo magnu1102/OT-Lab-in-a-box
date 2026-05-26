@@ -11,16 +11,73 @@ concepts. The project is **educational and defensive only**.
 
 ## Status
 
-**Phase 5** — safe failure scenarios added. Services are placed on four
-named Docker networks (`corp_net`, `dmz_net`, `ot_net`, `monitoring_net`)
-modelling a corporate/DMZ/OT/monitoring split, and the lab now includes
-deterministic failure demos for high tank alarm, PLC unavailable, HMI
-connection loss, historian unavailable, and historian poll errors. A
-`corporate-client` container self-tests the segmentation on startup. The
-HMI and Grafana are the only host-published services.
+**Phase 6** — portfolio polish and repeatable validation added. Services
+are placed on four named Docker networks (`corp_net`, `dmz_net`, `ot_net`,
+`monitoring_net`) modelling a corporate/DMZ/OT/monitoring split, and the
+lab now includes deterministic failure demos for high tank alarm, PLC
+unavailable, HMI connection loss, historian unavailable, and historian poll
+errors. The repo also includes screenshots, a local smoke test, and GitHub
+Actions CI. A `corporate-client` container self-tests the segmentation on
+startup. The HMI and Grafana are the only host-published services.
 
-The full roadmap (portfolio polish) is tracked in
+The full roadmap is tracked in
 [`ot_lab_in_a_box_project_plan.md`](ot_lab_in_a_box_project_plan.md).
+
+## What this demonstrates
+
+- A segmented local OT/IT lab with corporate, DMZ, OT, and monitoring
+  networks.
+- A simulated PLC/process service, operator HMI, historian, PostgreSQL,
+  Prometheus, and Grafana.
+- Defensive architecture documentation: allowed flows, network zones,
+  limitations, and runbook procedures.
+- Safe failure demonstrations for process alarm, simulator loss, historian
+  loss, and alert-rule visibility.
+- Repeatable validation through a smoke test script and GitHub Actions CI.
+
+## Demo in 5 minutes
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+Then:
+
+1. Open the HMI: <http://localhost:3000>
+2. Open Grafana: <http://localhost:3001>
+3. Trigger a high tank alarm:
+
+   ```bash
+   curl -X POST http://localhost:3000/api/sim/scenario \
+     -H 'Content-Type: application/json' \
+     -d '{"scenario": "high_tank"}'
+   ```
+
+4. Verify segmentation:
+
+   ```bash
+   docker compose logs corporate-client
+   ```
+
+5. Run the smoke test:
+
+   ```bash
+   ./scripts/smoke-test.sh
+   ```
+
+The smoke test resets the simulator back to the normal scenario before it
+exits.
+
+## Screenshots
+
+| HMI normal | HMI high tank alarm |
+|------------|---------------------|
+| ![HMI normal state](docs/assets/hmi-normal.png) | ![HMI high tank alarm](docs/assets/hmi-high-tank-alarm.png) |
+
+| Grafana overview | Segmentation self-test |
+|------------------|------------------------|
+| ![Grafana overview dashboard](docs/assets/grafana-overview.png) | ![Segmentation self-test terminal output](docs/assets/segmentation-self-test.png) |
 
 ## What's built
 
@@ -188,6 +245,7 @@ and historian are no longer published directly — that is intentional, see
 | GET    | `/api/state`                  | plc-simulator   | Current process state (JSON)          |
 | POST   | `/api/control/pump`           | plc-simulator   | `{"running": bool}` — toggle the pump |
 | POST   | `/api/sim/reset`              | plc-simulator   | Re-initialize the simulation          |
+| POST   | `/api/sim/scenario`           | plc-simulator   | `{"scenario": "normal" \| "high_tank"}` — apply a safe local demo scenario |
 | GET    | `/api/history/readings`       | historian       | Recent persisted readings (newest first). Query params: `limit` (1–1000, default 100), `since` (ISO-8601). |
 
 `/metrics` on both the simulator (`:8000`) and historian (`:8001`) is
@@ -218,9 +276,9 @@ Example `GET /api/state`:
 
 ## Roadmap
 
-Subsequent phase (from the project plan):
-
-1. Portfolio polish.
+The planned six-phase roadmap is now represented in the repository. Future
+work should stay selective: richer scenarios, CI-driven full smoke tests,
+or more observability only when they strengthen the educational story.
 
 ## Development notes
 
