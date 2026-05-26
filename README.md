@@ -52,20 +52,66 @@ model, failure scenarios) is tracked in
 
 ## Quick start
 
-Requires Docker and Docker Compose.
+### Prerequisites
+
+- **Docker Engine 24+** and **Docker Compose v2** (`docker compose ...`, not the legacy `docker-compose`).
+  - macOS / Windows: [Docker Desktop](https://www.docker.com/products/docker-desktop/) includes both.
+  - Linux: install `docker-ce` and the `docker-compose-plugin` package from your distro or Docker's official repo.
+- **Git** to clone the repo.
+- Free ports on the host: **3000** (HMI) and **8000** (simulator API). Override in `.env` if either is taken.
+
+Verify your setup:
 
 ```bash
+docker --version
+docker compose version
+```
+
+### Install and boot
+
+```bash
+# 1. Clone
+git clone https://github.com/<your-user>/ot-lab-in-a-box.git
+cd ot-lab-in-a-box
+
+# 2. Create your local env file (defaults are fine for local use)
 cp .env.example .env
+
+# 3. Build images and start all four services
 docker compose up --build
 ```
 
-Then open:
+First build takes a few minutes (Python, Node, Postgres, and nginx images
+download; the React app and Python deps install). Subsequent starts are
+fast.
 
-- HMI dashboard: <http://localhost:3000>
-- Simulator API:  <http://localhost:8000/api/state>
+When the logs settle, open:
+
+- **HMI dashboard:** <http://localhost:3000>
+- Simulator API: <http://localhost:8000/api/state>
 - Simulator health: <http://localhost:8000/health>
+- Persisted readings: <http://localhost:3000/api/history/readings?limit=5>
 
-Stop with `Ctrl+C` and clean up with `docker compose down`.
+The "Recent readings" table in the HMI populates within ~10 seconds of
+boot, once the historian has polled the simulator a few times.
+
+### Stop and clean up
+
+```bash
+# Foreground session: Ctrl+C, then stop containers
+docker compose down
+
+# Run in the background instead
+docker compose up -d --build
+docker compose logs -f          # tail logs
+docker compose down             # stop
+
+# Wipe persisted readings too (drops the postgres volume)
+docker compose down -v
+```
+
+More commands — inspecting Postgres, simulating outages, dev-without-Docker —
+are in [`docs/runbook.md`](docs/runbook.md).
 
 ## API summary
 
