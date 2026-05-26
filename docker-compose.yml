@@ -1,0 +1,20 @@
+services:
+  plc-simulator:
+    build: ./services/plc-simulator
+    container_name: plc-simulator
+    environment:
+      SIM_TICK_SECONDS: ${SIM_TICK_SECONDS:-0.5}
+      HMI_PORT: ${HMI_PORT:-3000}
+    ports:
+      - "${PLC_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  hmi-dashboard:
+    build: ./services/hmi-dashboard
+    container_name: hmi-dashboard
+    depends_on:
+      plc-simulator:
+        condition: service_healthy
+    ports:
+      - "${HMI_PORT:-3000}:80"
+    restart: unless-stopped

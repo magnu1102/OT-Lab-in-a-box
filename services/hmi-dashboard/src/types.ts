@@ -1,0 +1,9 @@
+export interface ProcessState {
+  tank_level: number;
+  pump_running: boolean;
+  inflow_rate: number;
+  outflow_rate: number;
+  temperature: number;
+  alarm: boolean;
+  last_updated: string;
+}
