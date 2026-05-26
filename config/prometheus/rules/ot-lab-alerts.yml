@@ -1,0 +1,38 @@
+groups:
+  - name: ot-lab-failure-scenarios
+    rules:
+      - alert: OTProcessAlarm
+        expr: ot_lab_alarm == 1
+        for: 15s
+        labels:
+          severity: warning
+        annotations:
+          summary: "OT process alarm active"
+          description: "The simulated water tank is outside its configured operating range."
+
+      - alert: PLCSimulatorDown
+        expr: up{job="plc-simulator"} == 0
+        for: 15s
+        labels:
+          severity: critical
+        annotations:
+          summary: "PLC simulator unavailable"
+          description: "Prometheus cannot scrape the simulated PLC service."
+
+      - alert: HistorianDown
+        expr: up{job="historian"} == 0
+        for: 15s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Historian unavailable"
+          description: "Prometheus cannot scrape the historian service."
+
+      - alert: HistorianPollErrors
+        expr: rate(ot_lab_historian_polls_total{result="error"}[2m]) > 0
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Historian poll errors detected"
+          description: "The historian is running but has recently failed to poll or persist readings."

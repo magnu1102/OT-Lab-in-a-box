@@ -1,0 +1,128 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ot_lab}
+      POSTGRES_USER: ${POSTGRES_USER:-ot_lab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ot_lab} -d ${POSTGRES_DB:-ot_lab}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [monitoring_net]
+    restart: unless-stopped
+
+  plc-simulator:
+    build: ./services/plc-simulator
+    container_name: plc-simulator
+    environment:
+      SIM_TICK_SECONDS: ${SIM_TICK_SECONDS:-0.5}
+      HMI_PORT: ${HMI_PORT:-3000}
+    networks: [ot_net]
+    restart: unless-stopped
+
+  historian:
+    build: ./services/historian
+    container_name: historian
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-ot_lab}
+      POSTGRES_USER: ${POSTGRES_USER:-ot_lab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+      PLC_SIMULATOR_URL: http://plc-simulator:8000
+      HISTORIAN_POLL_INTERVAL_SECONDS: ${HISTORIAN_POLL_INTERVAL_SECONDS:-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      plc-simulator:
+        condition: service_healthy
+    networks: [ot_net, monitoring_net]
+    restart: unless-stopped
+
+  hmi-dashboard:
+    build: ./services/hmi-dashboard
+    container_name: hmi-dashboard
+    depends_on:
+      plc-simulator:
+        condition: service_healthy
+      historian:
+        condition: service_started
+    ports:
+      - "${HMI_PORT:-3000}:80"
+    networks: [dmz_net, ot_net]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      plc-simulator:
+        condition: service_healthy
+      historian:
+        condition: service_started
+    networks: [ot_net, monitoring_net]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: grafana
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: "false"
+      GF_USERS_DEFAULT_THEME: dark
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      POSTGRES_DB: ${POSTGRES_DB:-ot_lab}
+      POSTGRES_USER: ${POSTGRES_USER:-ot_lab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    depends_on:
+      prometheus:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    networks: [monitoring_net]
+    restart: unless-stopped
+
+  corporate-client:
+    build: ./services/corporate-client
+    container_name: corporate-client
+    networks: [corp_net]
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  corp_net:
+    driver: bridge
+  dmz_net:
+    driver: bridge
+  ot_net:
+    driver: bridge
+  monitoring_net:
+    driver: bridge

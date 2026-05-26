@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 5s
+  scrape_timeout: 4s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: plc-simulator
+    static_configs:
+      - targets: ["plc-simulator:8000"]
+
+  - job_name: historian
+    static_configs:
+      - targets: ["historian:8001"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

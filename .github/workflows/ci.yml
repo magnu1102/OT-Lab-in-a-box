@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  hmi-build:
+    name: HMI build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        working-directory: services/hmi-dashboard
+        run: npm install
+      - name: Build
+        working-directory: services/hmi-dashboard
+        run: npm run build
+
+  plc-tests:
+    name: PLC simulator tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            services/plc-simulator/requirements.txt
+            services/plc-simulator/requirements-dev.txt
+      - name: Install dependencies
+        working-directory: services/plc-simulator
+        run: python -m pip install -r requirements-dev.txt
+      - name: Run tests
+        working-directory: services/plc-simulator
+        run: python -m pytest tests -q
+
+  config-validation:
+    name: Compose and Prometheus validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Docker Compose config
+        run: docker compose config --quiet
+      - name: Validate Prometheus config
+        run: |
+          docker run --rm \
+            --entrypoint promtool \
+            -v "$PWD/config/prometheus:/etc/prometheus:ro" \
+            prom/prometheus:v2.55.1 \
+            check config /etc/prometheus/prometheus.yml
