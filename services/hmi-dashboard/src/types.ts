@@ -7,3 +7,12 @@ export interface ProcessState {
   alarm: boolean;
   last_updated: string;
 }
+
+export interface Reading {
+  id: number;
+  timestamp: string;
+  tank_level: number;
+  pump_running: boolean;
+  temperature: number;
+  alarm: boolean;
+}

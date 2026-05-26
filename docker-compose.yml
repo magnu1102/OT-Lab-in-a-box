@@ -1,4 +1,21 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ot_lab}
+      POSTGRES_USER: ${POSTGRES_USER:-ot_lab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ot_lab} -d ${POSTGRES_DB:-ot_lab}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   plc-simulator:
     build: ./services/plc-simulator
     container_name: plc-simulator
@@ -9,12 +26,35 @@ services:
       - "${PLC_PORT:-8000}:8000"
     restart: unless-stopped
 
+  historian:
+    build: ./services/historian
+    container_name: historian
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-ot_lab}
+      POSTGRES_USER: ${POSTGRES_USER:-ot_lab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+      PLC_SIMULATOR_URL: http://plc-simulator:8000
+      HISTORIAN_POLL_INTERVAL_SECONDS: ${HISTORIAN_POLL_INTERVAL_SECONDS:-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      plc-simulator:
+        condition: service_healthy
+    restart: unless-stopped
+
   hmi-dashboard:
     build: ./services/hmi-dashboard
     container_name: hmi-dashboard
     depends_on:
       plc-simulator:
         condition: service_healthy
+      historian:
+        condition: service_started
     ports:
       - "${HMI_PORT:-3000}:80"
     restart: unless-stopped
+
+volumes:
+  postgres_data:

@@ -1,4 +1,4 @@
-import type { ProcessState } from "./types";
+import type { ProcessState, Reading } from "./types";
 
 export async function getState(signal?: AbortSignal): Promise<ProcessState> {
   const res = await fetch("/api/state", { signal });
@@ -27,4 +27,15 @@ export async function resetSim(): Promise<ProcessState> {
     throw new Error(`POST /api/sim/reset failed: ${res.status}`);
   }
   return (await res.json()) as ProcessState;
+}
+
+export async function getReadings(
+  limit = 20,
+  signal?: AbortSignal,
+): Promise<Reading[]> {
+  const res = await fetch(`/api/history/readings?limit=${limit}`, { signal });
+  if (!res.ok) {
+    throw new Error(`GET /api/history/readings failed: ${res.status}`);
+  }
+  return (await res.json()) as Reading[];
 }

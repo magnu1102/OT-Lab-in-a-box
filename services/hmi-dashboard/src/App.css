@@ -135,6 +135,56 @@ button.warn:hover {
   background: #8a4a1c;
 }
 
+.readings .readings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.readings h2 {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+}
+
+.readings-note {
+  font-size: 0.75rem;
+  color: #8b949e;
+}
+
+.readings table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.readings th,
+.readings td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid #21262d;
+}
+
+.readings th {
+  color: #8b949e;
+  font-weight: 500;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.readings tr.alarm td {
+  color: #ffd5d5;
+}
+
+.readings .empty {
+  margin: 0;
+  color: #8b949e;
+  font-size: 0.85rem;
+}
+
 .disclaimer {
   margin-top: 24px;
   font-size: 0.75rem;

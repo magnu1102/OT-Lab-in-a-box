@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
-import { getState, resetSim, setPump } from "./api";
-import type { ProcessState } from "./types";
+import { getReadings, getState, resetSim, setPump } from "./api";
+import type { ProcessState, Reading } from "./types";
 import "./App.css";
 
-const POLL_INTERVAL_MS = 2000;
+const STATE_POLL_MS = 2000;
+const READINGS_POLL_MS = 5000;
+const READINGS_LIMIT = 20;
 
 export default function App() {
   const [state, setState] = useState<ProcessState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const [readings, setReadings] = useState<Reading[]>([]);
+  const [readingsError, setReadingsError] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -29,7 +34,35 @@ export default function App() {
     };
 
     poll();
-    const id = setInterval(poll, POLL_INTERVAL_MS);
+    const id = setInterval(poll, STATE_POLL_MS);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const next = await getReadings(READINGS_LIMIT, controller.signal);
+        if (!cancelled) {
+          setReadings(next);
+          setReadingsError(null);
+        }
+      } catch (err) {
+        if (!cancelled && (err as Error).name !== "AbortError") {
+          setReadingsError("Historian unavailable.");
+        }
+      }
+    };
+
+    poll();
+    const id = setInterval(poll, READINGS_POLL_MS);
 
     return () => {
       cancelled = true;
@@ -124,6 +157,41 @@ export default function App() {
           Reset simulation
         </button>
       </div>
+
+      <section className="card readings">
+        <header className="readings-header">
+          <h2>Recent readings</h2>
+          <span className="readings-note">
+            {readingsError ?? `last ${readings.length} · from historian`}
+          </span>
+        </header>
+        {readings.length === 0 && !readingsError ? (
+          <p className="empty">No readings yet — waiting for historian…</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Level</th>
+                <th>Pump</th>
+                <th>Temp</th>
+                <th>Alarm</th>
+              </tr>
+            </thead>
+            <tbody>
+              {readings.map((r) => (
+                <tr key={r.id} className={r.alarm ? "alarm" : undefined}>
+                  <td>{new Date(r.timestamp).toLocaleTimeString()}</td>
+                  <td>{r.tank_level.toFixed(1)} %</td>
+                  <td>{r.pump_running ? "on" : "off"}</td>
+                  <td>{r.temperature.toFixed(1)} °C</td>
+                  <td>{r.alarm ? "✓" : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
 
       <p className="disclaimer">
         Educational simulation only. Not a real industrial control system.

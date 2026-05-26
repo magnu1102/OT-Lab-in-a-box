@@ -1,4 +1,4 @@
-# Runbook — Phase 1
+# Runbook
 
 ## Prerequisites
 
@@ -41,6 +41,8 @@ docker compose up -d plc-simulator
 
 ```bash
 docker compose logs -f plc-simulator
+docker compose logs -f historian
+docker compose logs -f postgres
 docker compose logs -f hmi-dashboard
 ```
 
@@ -67,6 +69,50 @@ curl -X POST http://localhost:8000/api/control/pump \
 curl -X POST http://localhost:8000/api/sim/reset
 ```
 
+## Inspect persisted readings
+
+The historian's API is reached via the HMI's nginx (its own port is not
+published):
+
+```bash
+# Latest 5 readings, newest first
+curl 'http://localhost:3000/api/history/readings?limit=5' | jq
+
+# Only readings newer than a given timestamp
+curl 'http://localhost:3000/api/history/readings?limit=200&since=2026-05-26T12:00:00Z' | jq
+```
+
+Or query Postgres directly:
+
+```bash
+# Count rows
+docker compose exec postgres \
+  psql -U ot_lab -d ot_lab -c 'SELECT count(*) FROM process_readings;'
+
+# Tail the last 10 rows
+docker compose exec postgres \
+  psql -U ot_lab -d ot_lab -c \
+  'SELECT timestamp, tank_level, pump_running, alarm FROM process_readings ORDER BY timestamp DESC LIMIT 10;'
+
+# Interactive shell
+docker compose exec postgres psql -U ot_lab -d ot_lab
+```
+
+## Back up / wipe the data volume
+
+```bash
+# Backup
+docker compose exec postgres pg_dump -U ot_lab ot_lab > backup.sql
+
+# Wipe (loses all stored readings)
+docker compose down
+docker volume rm "$(basename "$PWD" | tr '[:upper:] ' '[:lower:]-')_postgres_data"
+```
+
+The volume name is `<project>_postgres_data`, where `<project>` is
+docker-compose's slugified project directory name. `docker volume ls` will
+show the exact name.
+
 ## Try the connection-loss banner
 
 In one terminal:
@@ -82,6 +128,17 @@ Within ~2 seconds the HMI dashboard should show a yellow
 docker compose start plc-simulator
 ```
 
+## Try a historian outage
+
+```bash
+docker compose stop historian
+```
+
+The live panel keeps updating. The "Recent readings" card shows
+"Historian unavailable" within ~5 seconds. No rows are lost — Postgres is
+untouched. Restart with `docker compose start historian` and new rows
+resume on the next poll tick.
+
 ## Common issues
 
 - **Port already in use.** Change `PLC_PORT` or `HMI_PORT` in `.env`.
@@ -90,6 +147,12 @@ docker compose start plc-simulator
   a few seconds and reload.
 - **Stale build.** `docker compose build --no-cache <service>` forces a
   clean rebuild.
+- **Historian fails to connect to Postgres on first start.** It retries for
+  ~30s; check `docker compose logs historian`. If it eventually gives up,
+  Postgres healthcheck logs will explain why.
+- **Schema didn't get created.** `init.sql` only runs on **first** init of
+  the data volume. If you previously ran an empty Postgres on the same
+  volume, wipe the volume (see above) and start again.
 
 ## Development outside Docker
 
@@ -102,7 +165,25 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-HMI (the Vite dev server proxies `/api` and `/health` to `localhost:8000`):
+Historian (needs a reachable Postgres and simulator):
+
+```bash
+cd services/historian
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+POSTGRES_HOST=localhost POSTGRES_PORT=5432 \
+POSTGRES_DB=ot_lab POSTGRES_USER=ot_lab POSTGRES_PASSWORD=change_me \
+PLC_SIMULATOR_URL=http://localhost:8000 \
+uvicorn app.main:app --reload --port 8001
+```
+
+For host-local Postgres, the easiest path is to run only that container:
+`docker compose up -d postgres` and then publish the port temporarily by
+adding `ports: ["5432:5432"]` to its compose entry **only for the dev
+session**.
+
+HMI (the Vite dev server proxies `/api/history` to `localhost:8001` and the
+rest of `/api` + `/health` to `localhost:8000`):
 
 ```bash
 cd services/hmi-dashboard

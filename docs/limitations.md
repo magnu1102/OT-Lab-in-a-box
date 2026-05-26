@@ -18,21 +18,31 @@ Be honest about what it is and is not.
   with a JSON API.
 - **Not a substitute for OT security training** or hands-on experience with
   real industrial systems.
-- **Not production-grade.** State is in-memory; there is no authentication, no
-  TLS, no rate limiting, no audit logging.
+- **Not production-grade.** There is no authentication, no TLS, no rate
+  limiting, no audit logging. Persisted data is stored in plaintext in a
+  local Docker volume.
 - **Not a security testing tool.** The repository contains no exploit code,
   no attack automation, no scanning utilities, and no instructions for
   compromising real OT systems. It must not be used against real devices.
 
-## Phase 1 specific
+## Current limitations (Phases 1 + 2)
 
-- **No persistence.** Restarting `plc-simulator` resets the tank to its
-  initial state. Persistence arrives with the historian (Phase 2).
-- **No network segmentation.** Both services share a single default Docker
-  network. The DMZ / OT / monitoring zone model is introduced in Phase 4.
+- **Simulator state is still in-memory.** Restarting `plc-simulator` resets
+  the tank. The historian persists *readings* over time, but the live
+  process state itself is not durable.
+- **No retention policy.** `process_readings` grows unbounded. At the
+  default 2s poll interval that is ~43k rows/day, which is fine for a local
+  educational lab but is not a production retention strategy.
 - **No authentication or authorization.** Anyone with access to the host's
-  exposed ports can call `/api/control/pump`. This is acceptable for a local
-  educational lab and is called out in the architecture docs.
+  exposed ports can call `/api/control/pump`. The historian API has no
+  auth either; it is only reachable on the internal Docker network and via
+  the HMI nginx proxy. This is acceptable for a local educational lab.
+- **Default Postgres password (`change_me`).** Fine for a local lab; would
+  obviously need to change for anything else. The host port for Postgres is
+  intentionally not published.
+- **No network segmentation.** All four services share a single default
+  Docker network. The DMZ / OT / monitoring zone model is introduced in
+  Phase 4.
 - **No monitoring or metrics endpoint.** Phase 3 adds Prometheus-compatible
   `/metrics` and Grafana dashboards.
 - **Docker networks are not a security boundary.** When zones are added in

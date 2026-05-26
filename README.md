@@ -11,28 +11,44 @@ concepts. The project is **educational and defensive only**.
 
 ## Status
 
-**Phase 1** — basic simulated water-tank process and a minimal HMI dashboard.
+**Phase 2** — persistence layer added. Readings from the simulator are now
+polled and stored in PostgreSQL by a `historian` service, and the HMI shows
+the most recent rows.
 
-The full roadmap (historian, PostgreSQL, Prometheus/Grafana, network zone
-segmentation, threat model, failure scenarios) is tracked in
+The full roadmap (Prometheus/Grafana, network zone segmentation, threat
+model, failure scenarios) is tracked in
 [`ot_lab_in_a_box_project_plan.md`](ot_lab_in_a_box_project_plan.md).
 
-## What Phase 1 builds
+## What's built
 
 ```
-┌───────────┐      HTTP       ┌──────────────────┐      HTTP      ┌─────────────────┐
-│  Browser  │ ───────────────▶│  hmi-dashboard   │ ──────────────▶│  plc-simulator  │
-│           │                 │ (nginx + React)  │                │   (FastAPI)     │
-└───────────┘                 └──────────────────┘                └─────────────────┘
-                                    :3000                                :8000
+┌─────────┐    ┌──────────────────┐    ┌────────────────┐    ┌────────────┐
+│ Browser │───▶│  hmi-dashboard   │───▶│ plc-simulator  │◀───│ historian  │
+│         │    │ (nginx + React)  │    │  (FastAPI)     │    │ (FastAPI,  │
+└─────────┘    │       :3000      │    │      :8000     │    │   poll)    │
+               └────────┬─────────┘    └────────────────┘    └─────┬──────┘
+                        │  /api/history/*                          │
+                        └──────────────────────────────────────────┤
+                                                                   ▼
+                                                          ┌────────────────┐
+                                                          │   postgres     │
+                                                          │ (process_readings)
+                                                          └────────────────┘
 ```
 
 - **`plc-simulator`** — Python + FastAPI service simulating a water tank
   (level, pump state, inflow/outflow, temperature, alarm). Updates state in
   the background and exposes a JSON API.
+- **`historian`** — Python + FastAPI worker that polls `plc-simulator` every
+  2 seconds and writes each reading to PostgreSQL. Exposes a read-back API
+  (`/api/history/readings`). Survives simulator and DB outages without
+  crashing.
+- **`postgres`** — PostgreSQL 16 with the `process_readings` table created
+  on first boot via `config/postgres/init.sql`. Data lives in the named
+  volume `postgres_data`. Port is intentionally not published.
 - **`hmi-dashboard`** — React + TypeScript dashboard, built with Vite and
-  served by nginx. Polls the simulator every 2 seconds, displays live values,
-  and supports a pump on/off control.
+  served by nginx. Polls the simulator every 2 seconds, polls the historian
+  every 5 seconds for recent readings, and supports pump on/off and reset.
 
 ## Quick start
 
@@ -53,12 +69,17 @@ Stop with `Ctrl+C` and clean up with `docker compose down`.
 
 ## API summary
 
-| Method | Path                  | Purpose                                  |
-|--------|-----------------------|------------------------------------------|
-| GET    | `/health`             | Liveness probe                           |
-| GET    | `/api/state`          | Current process state (JSON)             |
-| POST   | `/api/control/pump`   | `{"running": bool}` — toggle the pump    |
-| POST   | `/api/sim/reset`      | Re-initialize the simulation             |
+All endpoints below are reachable through the HMI's nginx on `:3000`
+(e.g. `http://localhost:3000/api/state`). The simulator is also published
+directly on `:8000` for convenience.
+
+| Method | Path                          | Served by       | Purpose                               |
+|--------|-------------------------------|-----------------|---------------------------------------|
+| GET    | `/health`                     | plc-simulator   | Liveness probe                        |
+| GET    | `/api/state`                  | plc-simulator   | Current process state (JSON)          |
+| POST   | `/api/control/pump`           | plc-simulator   | `{"running": bool}` — toggle the pump |
+| POST   | `/api/sim/reset`              | plc-simulator   | Re-initialize the simulation          |
+| GET    | `/api/history/readings`       | historian       | Recent persisted readings (newest first). Query params: `limit` (1–1000, default 100), `since` (ISO-8601). |
 
 Example `GET /api/state`:
 
@@ -84,13 +105,12 @@ Example `GET /api/state`:
 
 Subsequent phases (from the project plan):
 
-1. Historian + PostgreSQL.
-2. Prometheus + Grafana monitoring.
-3. Multiple Docker networks for IT/DMZ/OT/monitoring zones, allowed-traffic
+1. Prometheus + Grafana monitoring.
+2. Multiple Docker networks for IT/DMZ/OT/monitoring zones, allowed-traffic
    matrix, architecture diagrams.
-4. Safe failure scenarios (high-level alarm, simulator unavailable, historian
+3. Safe failure scenarios (high-level alarm, simulator unavailable, historian
    unavailable).
-5. Portfolio polish.
+4. Portfolio polish.
 
 ## Development notes
 
