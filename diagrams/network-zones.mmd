@@ -1,0 +1,30 @@
+flowchart TB
+    subgraph corp["corp_net"]
+        cc[corporate-client]
+    end
+
+    subgraph dmz["dmz_net"]
+        hmi[hmi-dashboard]
+    end
+
+    subgraph ot["ot_net"]
+        plc[plc-simulator]
+        hist[historian]
+        prom[prometheus]
+    end
+
+    subgraph mon["monitoring_net"]
+        pg[(postgres)]
+        graf[grafana]
+    end
+
+    hmi  -- "operator API + history" --> plc
+    hmi  -- "recent readings"        --> hist
+    prom -- "scrape /metrics"        --> plc
+    prom -- "scrape /metrics"        --> hist
+    hist -- "INSERT readings"        --> pg
+    graf -- "PromQL"                 --> prom
+    graf -- "SQL"                    --> pg
+
+    classDef bridge stroke-dasharray: 5 5;
+    class hmi,hist,prom bridge;

@@ -11,42 +11,55 @@ concepts. The project is **educational and defensive only**.
 
 ## Status
 
-**Phase 3** — monitoring stack added. Prometheus scrapes `/metrics` from
-the simulator and historian; Grafana serves a pre-provisioned dashboard
-fed by Prometheus and Postgres.
+**Phase 4** — network zone segmentation added. Services are placed on four
+named Docker networks (`corp_net`, `dmz_net`, `ot_net`, `monitoring_net`)
+modelling a corporate/DMZ/OT/monitoring split. A `corporate-client`
+container self-tests the segmentation on startup. The HMI and Grafana are
+the only host-published services.
 
-The full roadmap (network zone segmentation, failure scenarios, portfolio
-polish) is tracked in
+The full roadmap (failure scenarios, portfolio polish) is tracked in
 [`ot_lab_in_a_box_project_plan.md`](ot_lab_in_a_box_project_plan.md).
 
 ## What's built
 
 ```
-                  ┌───────────────────┐
-                  │      Browser      │
-                  └───┬───────────┬───┘
-                      │           │
-              :3000   │           │   :3001
-                      ▼           ▼
-            ┌─────────────────┐  ┌─────────────────┐
-            │  hmi-dashboard  │  │     grafana     │
-            │ (nginx + React) │  │  (provisioned)  │
-            └───┬─────────────┘  └───┬─────────────┘
-                │  /api/*            │
-                ▼                    ▼
-    ┌─────────────────┐   ┌─────────────────┐
-    │  plc-simulator  │◀──│   prometheus    │──▶ /metrics on both
-    │    (FastAPI)    │   │    scrapes      │     plc-simulator
-    │      :8000      │   │      :9090      │     and historian
-    └────────┬────────┘   └────────┬────────┘
-             │ poll                │
-             ▼                     ▼
-    ┌─────────────────┐   ┌─────────────────┐
-    │    historian    │──▶│    postgres     │◀── grafana (Postgres
-    │   (FastAPI +    │   │ process_readings│      datasource)
-    │   asyncio)      │   │ (named volume)  │
-    └─────────────────┘   └─────────────────┘
+                 ┌─────────────────────────────────┐
+                 │             Browser             │
+                 └────┬───────────────────────┬────┘
+                  :3000                     :3001
+                      │                       │
+  ┌───────────────────┼───────────────────────┼─────────────────────────────────┐
+  │                   ▼                       │                                 │
+  │  ┌──────────────────────────┐             │                                 │
+  │  │     hmi-dashboard        │  dmz_net    │                                 │
+  │  │    (nginx + React)       │             │                                 │
+  │  └──────────┬───────────────┘             │                                 │
+  │             │  /api/*                     │                                 │
+  │   - - - - - │ - - - - - - - - - - - - - - │ - - - - - - - - - - - - - - - -│
+  │             ▼                             ▼                                 │
+  │  ┌──────────────────┐    ┌────────────────────┐         ┌────────────────┐  │
+  │  │   plc-simulator  │◀── │     prometheus     │ ───────▶│     grafana    │  │
+  │  │     (FastAPI)    │    │   scrapes /metrics │         │  (provisioned) │  │
+  │  └────────┬─────────┘    └─────────┬──────────┘         └───────┬────────┘  │
+  │           │ poll                   │                            │           │
+  │           ▼                        │           monitoring_net   │           │
+  │  ┌──────────────────┐              │              ┌─────────────▼─────┐     │
+  │  │    historian     │──INSERT──────┼─────────────▶│    postgres       │     │
+  │  │   (FastAPI +     │              │              │ process_readings  │     │
+  │  │     asyncio)     │              └──── PromQL ──┤  (named volume)   │     │
+  │  └──────────────────┘                             └───────────────────┘     │
+  │            ot_net                                                           │
+  │                                                                             │
+  │   - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -│
+  │                                                                             │
+  │   corp_net:  ┌────────────────────┐                                         │
+  │              │  corporate-client  │  (sees nothing else — by design)        │
+  │              └────────────────────┘                                         │
+  └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+Full zone breakdown and traffic rules: [`docs/network-zones.md`](docs/network-zones.md),
+[`docs/allowed-traffic-matrix.md`](docs/allowed-traffic-matrix.md).
 
 - **`plc-simulator`** — Python + FastAPI service simulating a water tank
   (level, pump state, inflow/outflow, temperature, alarm). Updates state in
@@ -62,23 +75,26 @@ polish) is tracked in
   served by nginx. Operator-facing UI: pump on/off, reset, live values,
   recent readings.
 - **`prometheus`** — Scrapes `/metrics` from the simulator and historian
-  every 5 seconds. 7-day retention in the `prometheus_data` volume.
+  every 5 seconds. 7-day retention in the `prometheus_data` volume. Not
+  reachable from the host in Phase 4 — query through Grafana → Explore.
 - **`grafana`** — Pre-provisioned dashboard (Prometheus + Postgres
   datasources). Engineer-facing UI for trends and scrape health. Anonymous
   Viewer is enabled for the local lab; admin login still works for editing.
+- **`corporate-client`** — Alpine container on `corp_net` only. Runs a
+  startup self-test that probes OT/DMZ/monitoring targets — every probe
+  is expected to fail, demonstrating that segmentation works.
 
 ### Ports
 
 | Service        | Host port | Purpose                              |
 |----------------|-----------|--------------------------------------|
-| hmi-dashboard  | 3000      | Operator UI                          |
-| grafana        | 3001      | Engineer dashboards (no login)       |
-| plc-simulator  | 8000      | Simulator API (convenience exposure) |
-| prometheus     | 9090      | PromQL queries (convenience exposure)|
+| hmi-dashboard  | 3000      | Operator UI (DMZ)                    |
+| grafana        | 3001      | Engineer dashboards (monitoring)     |
 
-`postgres` (5432) and `historian` (8001) are intentionally **not**
-published — reach them through `docker compose exec` or via the HMI's
-nginx proxy / Grafana's Postgres datasource.
+`plc-simulator`, `historian`, `prometheus`, `postgres`, and
+`corporate-client` are not published to the host. Reach them via
+`docker compose exec`, via the HMI's nginx proxy, or via Grafana's
+datasources, depending on the zone.
 
 ## Quick start
 
@@ -88,7 +104,7 @@ nginx proxy / Grafana's Postgres datasource.
   - macOS / Windows: [Docker Desktop](https://www.docker.com/products/docker-desktop/) includes both.
   - Linux: install `docker-ce` and the `docker-compose-plugin` package from your distro or Docker's official repo.
 - **Git** to clone the repo.
-- Free ports on the host: **3000** (HMI) and **8000** (simulator API). Override in `.env` if either is taken.
+- Free ports on the host: **3000** (HMI) and **3001** (Grafana). Override in `.env` if either is taken.
 
 Verify your setup:
 
@@ -120,11 +136,17 @@ When the logs settle, open:
 - **HMI dashboard (operator):** <http://localhost:3000>
 - **Grafana (engineer):** <http://localhost:3001> — opens directly into the
   "OT Lab — Overview" dashboard, no login required.
-- Prometheus: <http://localhost:9090/targets>
-- Simulator API: <http://localhost:8000/api/state>
-- Simulator metrics: <http://localhost:8000/metrics>
-- Simulator health: <http://localhost:8000/health>
-- Persisted readings: <http://localhost:3000/api/history/readings?limit=5>
+- Simulator API (proxied through HMI): <http://localhost:3000/api/state>
+- Simulator health (proxied): <http://localhost:3000/health>
+- Persisted readings (proxied): <http://localhost:3000/api/history/readings?limit=5>
+
+Verify segmentation:
+
+```bash
+docker compose logs corporate-client
+```
+
+Every probe in the log should show `[PASS] ... UNREACHABLE (expected)`.
 
 The "Recent readings" table in the HMI populates within ~10 seconds of
 boot, once the historian has polled the simulator a few times.
@@ -149,9 +171,10 @@ are in [`docs/runbook.md`](docs/runbook.md).
 
 ## API summary
 
-All endpoints below are reachable through the HMI's nginx on `:3000`
-(e.g. `http://localhost:3000/api/state`). The simulator is also published
-directly on `:8000` for convenience.
+All endpoints are reachable from the host **only** through the HMI's
+nginx on `:3000` (e.g. `http://localhost:3000/api/state`). The simulator
+and historian are no longer published directly — that is intentional, see
+[`docs/network-zones.md`](docs/network-zones.md).
 
 | Method | Path                          | Served by       | Purpose                               |
 |--------|-------------------------------|-----------------|---------------------------------------|
@@ -159,9 +182,11 @@ directly on `:8000` for convenience.
 | GET    | `/api/state`                  | plc-simulator   | Current process state (JSON)          |
 | POST   | `/api/control/pump`           | plc-simulator   | `{"running": bool}` — toggle the pump |
 | POST   | `/api/sim/reset`              | plc-simulator   | Re-initialize the simulation          |
-| GET    | `/metrics`                    | plc-simulator   | Prometheus exposition (process gauges, command counters) |
 | GET    | `/api/history/readings`       | historian       | Recent persisted readings (newest first). Query params: `limit` (1–1000, default 100), `since` (ISO-8601). |
-| GET    | `/metrics` (on `:8001`)       | historian       | Prometheus exposition (poll counters, query counts, DB up) |
+
+`/metrics` on both the simulator (`:8000`) and historian (`:8001`) is
+scraped by Prometheus inside the compose network. It is not proxied
+through the HMI — engineers consume metrics via Grafana.
 
 Example `GET /api/state`:
 
@@ -179,7 +204,9 @@ Example `GET /api/state`:
 
 ## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — Phase 1 service layout.
+- [`docs/architecture.md`](docs/architecture.md) — service layout per phase.
+- [`docs/network-zones.md`](docs/network-zones.md) — the four-zone model.
+- [`docs/allowed-traffic-matrix.md`](docs/allowed-traffic-matrix.md) — every allowed and forbidden edge.
 - [`docs/runbook.md`](docs/runbook.md) — running, inspecting, troubleshooting.
 - [`docs/limitations.md`](docs/limitations.md) — what this lab is and is not.
 
@@ -187,11 +214,9 @@ Example `GET /api/state`:
 
 Subsequent phases (from the project plan):
 
-1. Multiple Docker networks for IT/DMZ/OT/monitoring zones, allowed-traffic
-   matrix, architecture diagrams.
-2. Safe failure scenarios (high-level alarm, simulator unavailable, historian
+1. Safe failure scenarios (high-level alarm, simulator unavailable, historian
    unavailable).
-3. Portfolio polish.
+2. Portfolio polish.
 
 ## Development notes
 

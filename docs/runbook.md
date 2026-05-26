@@ -50,25 +50,37 @@ docker compose logs -f grafana
 
 ## Hit the API from a terminal
 
-```bash
-# Health
-curl http://localhost:8000/health
+In Phase 4, the simulator and historian are no longer published on the
+host. All terminal access goes through the HMI's nginx proxy on `:3000`
+(or, for engineer-only access, via `docker compose exec`).
 
-# State (repeat — values change)
-curl http://localhost:8000/api/state | jq
+```bash
+# Health (proxied)
+curl http://localhost:3000/health
+
+# State — repeat, values change
+curl http://localhost:3000/api/state | jq
 
 # Stop the pump (tank level will start trending down)
-curl -X POST http://localhost:8000/api/control/pump \
+curl -X POST http://localhost:3000/api/control/pump \
   -H 'Content-Type: application/json' \
   -d '{"running": false}'
 
 # Start it again
-curl -X POST http://localhost:8000/api/control/pump \
+curl -X POST http://localhost:3000/api/control/pump \
   -H 'Content-Type: application/json' \
   -d '{"running": true}'
 
 # Reset the simulation
-curl -X POST http://localhost:8000/api/sim/reset
+curl -X POST http://localhost:3000/api/sim/reset
+```
+
+To talk to the simulator directly (e.g. to confirm a Phase 4 segmentation
+property), exec into a container that lives on `ot_net`:
+
+```bash
+docker compose exec plc-simulator curl -s localhost:8000/api/state | jq
+docker compose exec hmi-dashboard wget -qO- http://plc-simulator:8000/api/state
 ```
 
 ## Inspect persisted readings
@@ -120,11 +132,13 @@ show the exact name.
 - Grafana: <http://localhost:3001> — opens directly into "OT Lab — Overview"
   (anonymous Viewer). To edit panels, sign in with the admin credentials
   from `.env` (default `admin/admin`).
-- Prometheus: <http://localhost:9090>. Useful pages:
-  - `/targets` — should show both `plc-simulator` and `historian` as `UP`.
-  - `/graph` — quick PromQL exploration.
+- Prometheus is **not published to the host** in Phase 4. Run PromQL via
+  Grafana → Explore (default datasource is Prometheus) or exec into a
+  monitoring-zone container:
+  - `docker compose exec grafana wget -qO- http://prometheus:9090/api/v1/targets`
+  - `docker compose exec grafana wget -qO- 'http://prometheus:9090/api/v1/query?query=up'`
 
-PromQL examples:
+PromQL examples (paste into Grafana → Explore):
 
 ```promql
 # Live tank level
@@ -140,11 +154,11 @@ rate(ot_lab_historian_polls_total{result="error"}[5m])
 histogram_quantile(0.95, sum by (le) (rate(ot_lab_historian_poll_duration_seconds_bucket[5m])))
 ```
 
-Raw metric scrapes:
+Raw metric scrapes from inside the OT/monitoring zone:
 
 ```bash
-curl http://localhost:8000/metrics | grep ot_lab_
-docker compose exec historian curl -s http://localhost:8001/metrics | grep ot_lab_historian_
+docker compose exec plc-simulator curl -s localhost:8000/metrics | grep ot_lab_
+docker compose exec historian curl -s localhost:8001/metrics | grep ot_lab_historian_
 ```
 
 ### Editing the provisioned dashboard
@@ -161,6 +175,41 @@ read-only into the container. To iterate:
 The `dashboards.yml` provider re-reads files every 30 seconds, so the next
 `docker compose up` (or `docker compose restart grafana`) will load your
 committed version.
+
+## Demonstrate the zone model
+
+The `corporate-client` container sits on `corp_net` alone. On startup it
+probes every forbidden cross-zone target it can name. Every probe is
+expected to fail.
+
+```bash
+docker compose logs corporate-client
+```
+
+Expected: each line ends with `[PASS] ... UNREACHABLE (expected)`. A
+`[FAIL] ... REACHABLE` line means the zone configuration has leaked.
+
+Run more probes interactively:
+
+```bash
+docker compose exec corporate-client bash
+
+# From inside the container — all should fail:
+curl --max-time 3 -v http://plc-simulator:8000/api/state
+curl --max-time 3 -v http://postgres:5432
+getent hosts hmi-dashboard      # name resolution should also fail
+```
+
+For the positive side of the matrix, exec into a container that *is*
+allowed to reach the target and confirm it works:
+
+```bash
+docker compose exec hmi-dashboard wget -qO- http://plc-simulator:8000/api/state
+docker compose exec grafana      wget -qO- http://prometheus:9090/-/healthy
+docker compose exec historian    curl -s http://plc-simulator:8000/api/state | head -c 200
+```
+
+Full table of expected results: [`docs/allowed-traffic-matrix.md`](allowed-traffic-matrix.md).
 
 ## Try the connection-loss banner
 
@@ -190,7 +239,8 @@ resume on the next poll tick.
 
 ## Common issues
 
-- **Port already in use.** Change `PLC_PORT` or `HMI_PORT` in `.env`.
+- **Port already in use.** Change `HMI_PORT` or `GRAFANA_PORT` in `.env`.
+  The simulator and Prometheus no longer publish to the host in Phase 4.
 - **HMI shows the error banner immediately.** The simulator container may
   not be healthy yet — `docker compose ps` will show its health status. Wait
   a few seconds and reload.
@@ -202,9 +252,10 @@ resume on the next poll tick.
 - **Schema didn't get created.** `init.sql` only runs on **first** init of
   the data volume. If you previously ran an empty Postgres on the same
   volume, wipe the volume (see above) and start again.
-- **Grafana panels are empty.** Open <http://localhost:9090/targets> — if
-  either job is `DOWN`, the panel will be empty. If targets are `UP`, the
-  data may simply be too recent (give it ~30s after first boot).
+- **Grafana panels are empty.** Open Grafana → Explore and run
+  `up{job=~"plc-simulator|historian"}` — both should be `1`. If either is
+  `0`, the corresponding service is down. If both are `1`, the data may
+  simply be too recent (give it ~30s after first boot).
 - **Grafana dashboard shows "Datasource not found".** The provisioning
   files use the literal UIDs `Prometheus` and `Postgres`. If you renamed a
   datasource in the UI, restore the originals or update the dashboard JSON.
@@ -220,7 +271,22 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-Historian (needs a reachable Postgres and simulator):
+Dev-without-Docker requires temporarily publishing the simulator and
+Postgres host ports (they are deliberately unpublished in the Phase 4
+compose). The simplest path is to add temporary `ports:` overrides to a
+local `docker-compose.override.yml` — `git status` will flag it so you
+don't commit it.
+
+```yaml
+# docker-compose.override.yml  (DO NOT COMMIT)
+services:
+  plc-simulator:
+    ports: ["8000:8000"]
+  postgres:
+    ports: ["5432:5432"]
+```
+
+Then:
 
 ```bash
 cd services/historian
@@ -231,11 +297,6 @@ POSTGRES_DB=ot_lab POSTGRES_USER=ot_lab POSTGRES_PASSWORD=change_me \
 PLC_SIMULATOR_URL=http://localhost:8000 \
 uvicorn app.main:app --reload --port 8001
 ```
-
-For host-local Postgres, the easiest path is to run only that container:
-`docker compose up -d postgres` and then publish the port temporarily by
-adding `ports: ["5432:5432"]` to its compose entry **only for the dev
-session**.
 
 HMI (the Vite dev server proxies `/api/history` to `localhost:8001` and the
 rest of `/api` + `/health` to `localhost:8000`):

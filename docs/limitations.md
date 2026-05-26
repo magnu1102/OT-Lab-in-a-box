@@ -51,12 +51,19 @@ Be honest about what it is and is not.
   Docker network; do not expose them on a real network.
 - **No alerting.** Prometheus is running without rule files and there is no
   Alertmanager. Alert routing arrives with Phase 5 (failure scenarios).
-- **Convenience host exposures.** `plc-simulator:8000` and
-  `prometheus:9090` are published to the host for development ergonomics.
-  Phase 4 (zone segmentation) removes both.
-- **Docker networks are not a security boundary.** When zones are added in
-  Phase 4, they will model segmentation conceptually — they are not a
-  replacement for real firewalls, VLANs, or industrial security architecture.
+- **Segmentation, not enforcement.** Phase 4 places services on four
+  named Docker networks so that non-members cannot resolve or route to
+  each other. Containers that **share** a network still have full mutual
+  access on any port — Docker networks do not enforce per-port allow-lists,
+  rate limits, or deep packet inspection. Real OT environments add
+  firewalls, host-based controls, and (sometimes) service meshes. See
+  [`docs/network-zones.md`](network-zones.md#what-docker-networks-enforce--and-dont)
+  for the full discussion.
+- **corporate-client smoke script is defensive.** It probes a fixed list
+  of declared local targets, *expecting failure*, and reports the result.
+  It performs no exploitation, no port-range scans, and no enumeration
+  beyond declared targets. It will not run against anything outside this
+  compose project.
 
 ## Out of scope, permanently
 

@@ -174,11 +174,48 @@ Everything Grafana needs ships in `config/grafana/`:
 - `dashboards/ot-lab-overview.json` — the dashboard itself, committed to
   the repo so it round-trips through git.
 
+## Phase 4 — network zones
+
+Phase 4 replaces the single default Docker network with four named ones
+(`corp_net`, `dmz_net`, `ot_net`, `monitoring_net`) and removes the
+convenience host exposures of `plc-simulator:8000` and `prometheus:9090`.
+The only two services published to the host are `hmi-dashboard:3000`
+(operator entry) and `grafana:3001` (engineer entry).
+
+### Service placement
+
+| Service           | corp_net | dmz_net | ot_net | monitoring_net |
+|-------------------|:--------:|:-------:|:------:|:--------------:|
+| corporate-client  |    ✓     |         |        |                |
+| hmi-dashboard     |          |    ✓    |   ✓    |                |
+| plc-simulator     |          |         |   ✓    |                |
+| historian         |          |         |   ✓    |       ✓        |
+| prometheus        |          |         |   ✓    |       ✓        |
+| postgres          |          |         |        |       ✓        |
+| grafana           |          |         |        |       ✓        |
+
+The three legitimate bridges are `hmi-dashboard` (DMZ ↔ OT, for the
+operator), `historian` (OT → monitoring, for persistence), and
+`prometheus` (OT → monitoring, for scraping). No service crosses more
+than two zones.
+
+The full zone reasoning, the allowed-flows matrix, and the honest "what
+Docker networks enforce — and don't" discussion live in
+[`network-zones.md`](network-zones.md) and
+[`allowed-traffic-matrix.md`](allowed-traffic-matrix.md).
+
+### Self-verifying segmentation
+
+`corporate-client` lives on `corp_net` only and runs a startup script
+that probes every forbidden cross-zone target it can name. The expected
+output is `[PASS] ... UNREACHABLE` on every line; a `[FAIL] REACHABLE`
+result indicates a broken zone configuration. See the runbook section
+[Demonstrate the zone model](runbook.md#demonstrate-the-zone-model).
+
 ## What changes in later phases
 
-- **Phase 4**: services are placed on dedicated Docker networks
-  (`corp_net`, `dmz_net`, `ot_net`, `monitoring_net`); convenience host
-  exposures of `plc-simulator:8000` and `prometheus:9090` are removed.
 - **Phase 5**: documented failure scenarios (high-level alarm, simulator
   unavailable, historian unavailable) with expected HMI / log / dashboard
-  behaviour.
+  behaviour, plus first alerting rules.
+- **Phase 6**: portfolio polish — screenshots, demo flow, smoke-test
+  script, GitHub Actions CI.

@@ -14,6 +14,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    networks: [monitoring_net]
     restart: unless-stopped
 
   plc-simulator:
@@ -22,8 +23,7 @@ services:
     environment:
       SIM_TICK_SECONDS: ${SIM_TICK_SECONDS:-0.5}
       HMI_PORT: ${HMI_PORT:-3000}
-    ports:
-      - "${PLC_PORT:-8000}:8000"
+    networks: [ot_net]
     restart: unless-stopped
 
   historian:
@@ -42,6 +42,7 @@ services:
         condition: service_healthy
       plc-simulator:
         condition: service_healthy
+    networks: [ot_net, monitoring_net]
     restart: unless-stopped
 
   hmi-dashboard:
@@ -54,6 +55,7 @@ services:
         condition: service_started
     ports:
       - "${HMI_PORT:-3000}:80"
+    networks: [dmz_net, ot_net]
     restart: unless-stopped
 
   prometheus:
@@ -68,13 +70,12 @@ services:
     volumes:
       - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
-    ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
     depends_on:
       plc-simulator:
         condition: service_healthy
       historian:
         condition: service_started
+    networks: [ot_net, monitoring_net]
     restart: unless-stopped
 
   grafana:
@@ -101,9 +102,26 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
+    networks: [monitoring_net]
+    restart: unless-stopped
+
+  corporate-client:
+    build: ./services/corporate-client
+    container_name: corporate-client
+    networks: [corp_net]
     restart: unless-stopped
 
 volumes:
   postgres_data:
   prometheus_data:
   grafana_data:
+
+networks:
+  corp_net:
+    driver: bridge
+  dmz_net:
+    driver: bridge
+  ot_net:
+    driver: bridge
+  monitoring_net:
+    driver: bridge
