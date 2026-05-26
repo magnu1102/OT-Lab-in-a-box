@@ -1,4 +1,4 @@
-import type { ProcessState, Reading } from "./types";
+import type { ProcessState, Reading, ScenarioName } from "./types";
 
 export async function getState(signal?: AbortSignal): Promise<ProcessState> {
   const res = await fetch("/api/state", { signal });
@@ -25,6 +25,18 @@ export async function resetSim(): Promise<ProcessState> {
   const res = await fetch("/api/sim/reset", { method: "POST" });
   if (!res.ok) {
     throw new Error(`POST /api/sim/reset failed: ${res.status}`);
+  }
+  return (await res.json()) as ProcessState;
+}
+
+export async function setScenario(scenario: ScenarioName): Promise<ProcessState> {
+  const res = await fetch("/api/sim/scenario", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scenario }),
+  });
+  if (!res.ok) {
+    throw new Error(`POST /api/sim/scenario failed: ${res.status}`);
   }
   return (await res.json()) as ProcessState;
 }

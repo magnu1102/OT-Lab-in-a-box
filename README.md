@@ -11,13 +11,15 @@ concepts. The project is **educational and defensive only**.
 
 ## Status
 
-**Phase 4** — network zone segmentation added. Services are placed on four
+**Phase 5** — safe failure scenarios added. Services are placed on four
 named Docker networks (`corp_net`, `dmz_net`, `ot_net`, `monitoring_net`)
-modelling a corporate/DMZ/OT/monitoring split. A `corporate-client`
-container self-tests the segmentation on startup. The HMI and Grafana are
-the only host-published services.
+modelling a corporate/DMZ/OT/monitoring split, and the lab now includes
+deterministic failure demos for high tank alarm, PLC unavailable, HMI
+connection loss, historian unavailable, and historian poll errors. A
+`corporate-client` container self-tests the segmentation on startup. The
+HMI and Grafana are the only host-published services.
 
-The full roadmap (failure scenarios, portfolio polish) is tracked in
+The full roadmap (portfolio polish) is tracked in
 [`ot_lab_in_a_box_project_plan.md`](ot_lab_in_a_box_project_plan.md).
 
 ## What's built
@@ -76,13 +78,17 @@ Full zone breakdown and traffic rules: [`docs/network-zones.md`](docs/network-zo
   recent readings.
 - **`prometheus`** — Scrapes `/metrics` from the simulator and historian
   every 5 seconds. 7-day retention in the `prometheus_data` volume. Not
-  reachable from the host in Phase 4 — query through Grafana → Explore.
+  reachable from the host in Phase 5 — query through Grafana → Explore.
+  Loads local alerting rules for the safe failure scenarios.
 - **`grafana`** — Pre-provisioned dashboard (Prometheus + Postgres
   datasources). Engineer-facing UI for trends and scrape health. Anonymous
   Viewer is enabled for the local lab; admin login still works for editing.
 - **`corporate-client`** — Alpine container on `corp_net` only. Runs a
   startup self-test that probes OT/DMZ/monitoring targets — every probe
   is expected to fail, demonstrating that segmentation works.
+- **Safe failure scenarios** — documented local-only demos for process
+  alarm, PLC outage, HMI connection loss, historian outage, and historian
+  poll errors. See [`docs/runbook.md`](docs/runbook.md#safe-failure-scenarios).
 
 ### Ports
 
@@ -123,7 +129,7 @@ cd ot-lab-in-a-box
 # 2. Create your local env file (defaults are fine for local use)
 cp .env.example .env
 
-# 3. Build images and start all four services
+# 3. Build images and start all lab services
 docker compose up --build
 ```
 
@@ -212,11 +218,9 @@ Example `GET /api/state`:
 
 ## Roadmap
 
-Subsequent phases (from the project plan):
+Subsequent phase (from the project plan):
 
-1. Safe failure scenarios (high-level alarm, simulator unavailable, historian
-   unavailable).
-2. Portfolio polish.
+1. Portfolio polish.
 
 ## Development notes
 

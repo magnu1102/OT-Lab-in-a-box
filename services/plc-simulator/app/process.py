@@ -58,6 +58,13 @@ class WaterTankProcess:
         self.alarm = False
         self.last_updated = _utcnow()
 
+    def set_high_tank_scenario(self) -> None:
+        self.tank_level = 98.0
+        self.pump_running = True
+        self.temperature = 18.5
+        self.alarm = True
+        self.last_updated = _utcnow()
+
 
 def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))

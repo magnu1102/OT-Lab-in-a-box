@@ -1,10 +1,10 @@
 # Architecture
 
 The lab is built incrementally. Phase 1 introduced the live simulator and
-HMI; Phase 2 adds persistence. Network segmentation and monitoring come in
-later phases.
+HMI; Phase 2 added persistence; Phase 3 added monitoring; Phase 4 added
+network zones; Phase 5 adds safe, local-only failure scenarios.
 
-## Current components (Phases 1 + 2)
+## Current components (Phases 1-5)
 
 ```
                     ┌─────────────────────────────────┐
@@ -40,7 +40,10 @@ later phases.
 - `WaterTankProcess` dataclass holds in-memory state. An asyncio background
   task calls `process.step(dt)` every `SIM_TICK_SECONDS` (default 0.5s).
 - Endpoints: `GET /health`, `GET /api/state`, `POST /api/control/pump`,
-  `POST /api/sim/reset`.
+  `POST /api/sim/reset`, `POST /api/sim/scenario`.
+- `POST /api/sim/scenario` accepts `normal` and `high_tank`. It changes
+  only in-memory simulator state so demos can trigger alarm behavior
+  deterministically.
 - State is in-memory only — restarting the container resets the tank.
   Persistence is handled by the historian.
 
@@ -100,9 +103,9 @@ alarm BOOLEAN
   nginx (`/api/history/...` on `:3000`) or `docker compose exec historian
   curl localhost:8001/...`. This mirrors how a historian in a real OT
   environment would not be directly internet-facing.
-- The **simulator port (`8000`) is** published, for convenience in
-  testing and to keep the Phase 1 quick-start unchanged. In Phase 4
-  (network zones) it will move behind the DMZ.
+- **Simulator port (`8000`) is not published.** The HMI proxies operator
+  API traffic from the DMZ into OT, and direct inspection uses
+  `docker compose exec` from a container on `ot_net`.
 
 ## Data flow
 
@@ -161,7 +164,7 @@ The HMI and Grafana are intentionally separate:
   for understanding the *lab itself* and how it behaves.
 
 In a real OT/IT environment these audiences map to different humans, often
-on different networks. The Phase 4 zone model will reflect that.
+on different networks. The zone model reflects that split.
 
 ### Provisioning
 
@@ -212,10 +215,24 @@ output is `[PASS] ... UNREACHABLE` on every line; a `[FAIL] REACHABLE`
 result indicates a broken zone configuration. See the runbook section
 [Demonstrate the zone model](runbook.md#demonstrate-the-zone-model).
 
+## Phase 5 — safe failure scenarios
+
+Phase 5 makes failure behavior easy to demonstrate without unsafe tooling
+or long waits. The simulator exposes a local-only scenario endpoint for a
+high tank alarm, while service outages are demonstrated with Docker
+Compose stop/start commands.
+
+Prometheus loads rule files from `config/prometheus/rules/`:
+
+- `OTProcessAlarm` fires when `ot_lab_alarm == 1`.
+- `PLCSimulatorDown` fires when the simulator scrape target is down.
+- `HistorianDown` fires when the historian scrape target is down.
+- `HistorianPollErrors` fires when the historian records recent poll errors.
+
+There is no Alertmanager in this phase. Alerts are inspected through
+Grafana Explore or Prometheus APIs from inside the monitoring zone.
+
 ## What changes in later phases
 
-- **Phase 5**: documented failure scenarios (high-level alarm, simulator
-  unavailable, historian unavailable) with expected HMI / log / dashboard
-  behaviour, plus first alerting rules.
 - **Phase 6**: portfolio polish — screenshots, demo flow, smoke-test
   script, GitHub Actions CI.

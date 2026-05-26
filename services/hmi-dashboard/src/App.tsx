@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { getReadings, getState, resetSim, setPump } from "./api";
-import type { ProcessState, Reading } from "./types";
+import { getReadings, getState, resetSim, setPump, setScenario } from "./api";
+import type { ProcessState, Reading, ScenarioName } from "./types";
 import "./App.css";
 
 const STATE_POLL_MS = 2000;
@@ -98,13 +98,34 @@ export default function App() {
     }
   }, []);
 
+  const onScenario = useCallback(async (scenario: ScenarioName) => {
+    setBusy(true);
+    try {
+      const next = await setScenario(scenario);
+      setState(next);
+      setError(null);
+    } catch {
+      setError("Failed to apply simulator scenario.");
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const alarmText = state?.alarm
+    ? state.tank_level > 95
+      ? "ALARM · high tank level"
+      : state.tank_level < 5
+        ? "ALARM · low tank level"
+        : "ALARM · tank level out of range"
+    : null;
+
   return (
     <div className="app">
       <h1>OT Lab HMI</h1>
       <p className="subtitle">Simulated water-tank process · read &amp; control</p>
 
       {error && <div className="banner error">{error}</div>}
-      {state?.alarm && <div className="banner alarm">ALARM · tank level out of range</div>}
+      {alarmText && <div className="banner alarm">{alarmText}</div>}
 
       <div className="card">
         <div className="row">
@@ -156,6 +177,14 @@ export default function App() {
         <button className="warn" onClick={onReset} disabled={busy}>
           Reset simulation
         </button>
+        <div className="scenario-controls" aria-label="Simulator scenarios">
+          <button onClick={() => onScenario("high_tank")} disabled={busy || !state}>
+            High tank scenario
+          </button>
+          <button onClick={() => onScenario("normal")} disabled={busy}>
+            Normal scenario
+          </button>
+        </div>
       </div>
 
       <section className="card readings">

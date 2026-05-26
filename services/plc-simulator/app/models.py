@@ -1,4 +1,5 @@
 from datetime import datetime
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
@@ -24,3 +25,12 @@ class PumpCommand(BaseModel):
 class PumpCommandResponse(BaseModel):
     accepted: bool = True
     state: ProcessState
+
+
+class ScenarioName(StrEnum):
+    normal = "normal"
+    high_tank = "high_tank"
+
+
+class ScenarioCommand(BaseModel):
+    scenario: ScenarioName

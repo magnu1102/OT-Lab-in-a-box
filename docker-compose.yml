@@ -69,6 +69,7 @@ services:
       - "--web.console.templates=/usr/share/prometheus/consoles"
     volumes:
       - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus/rules:/etc/prometheus/rules:ro
       - prometheus_data:/prometheus
     depends_on:
       plc-simulator:

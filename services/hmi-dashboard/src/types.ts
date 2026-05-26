@@ -16,3 +16,5 @@ export interface Reading {
   temperature: number;
   alarm: boolean;
 }
+
+export type ScenarioName = "normal" | "high_tank";

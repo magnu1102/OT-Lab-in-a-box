@@ -21,6 +21,8 @@ from .models import (
     ProcessState,
     PumpCommand,
     PumpCommandResponse,
+    ScenarioCommand,
+    ScenarioName,
 )
 from .process import WaterTankProcess
 
@@ -108,4 +110,17 @@ def reset_sim() -> ProcessState:
     process.reset()
     metrics.update_from_state(process)
     metrics.SIM_RESETS_TOTAL.inc()
+    return _current_state()
+
+
+@app.post("/api/sim/scenario", response_model=ProcessState)
+def set_scenario(command: ScenarioCommand) -> ProcessState:
+    """Apply a deterministic, local-only simulator scenario."""
+    if command.scenario is ScenarioName.normal:
+        process.reset()
+        metrics.SIM_RESETS_TOTAL.inc()
+    elif command.scenario is ScenarioName.high_tank:
+        process.set_high_tank_scenario()
+
+    metrics.update_from_state(process)
     return _current_state()

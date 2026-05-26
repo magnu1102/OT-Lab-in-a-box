@@ -797,6 +797,8 @@ Please inspect the repository state first, then propose a step-by-step implement
 - Initial process simulation: water tank.
 - First phase should only build PLC simulator and HMI.
 - Historian, monitoring and segmentation docs come after the basic demo works.
+- Phase 5 adds safe, local-only failure scenarios with a deterministic high
+  tank simulator state, Docker Compose outage demos and Prometheus alert rules.
 - The repository should be public and GitHub-friendly.
 - AI agents must not add themselves as contributors or add generated-by attribution.
 - Documentation is a core deliverable, not an afterthought.

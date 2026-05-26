@@ -213,6 +213,9 @@ Full table of expected results: [`docs/allowed-traffic-matrix.md`](allowed-traff
 
 ## Try the connection-loss banner
 
+This is part of the safe failure scenario set. It demonstrates what an
+operator sees when the HMI can no longer reach the simulated PLC.
+
 In one terminal:
 
 ```bash
@@ -228,6 +231,9 @@ docker compose start plc-simulator
 
 ## Try a historian outage
 
+This is part of the safe failure scenario set. It demonstrates that the
+live process view and history panel fail independently.
+
 ```bash
 docker compose stop historian
 ```
@@ -236,6 +242,120 @@ The live panel keeps updating. The "Recent readings" card shows
 "Historian unavailable" within ~5 seconds. No rows are lost — Postgres is
 untouched. Restart with `docker compose start historian` and new rows
 resume on the next poll tick.
+
+## Safe failure scenarios
+
+All scenarios are local, simulated and defensive. They affect only this
+Docker Compose lab.
+
+### High tank alarm
+
+Trigger a deterministic high-level process alarm:
+
+```bash
+curl -X POST http://localhost:3000/api/sim/scenario \
+  -H 'Content-Type: application/json' \
+  -d '{"scenario": "high_tank"}' | jq
+```
+
+Expected HMI behavior:
+
+- The alarm banner reads `ALARM · high tank level`.
+- Tank level is above 95%.
+- Pump state is running so the simulated alarm remains observable.
+- Recent historian readings begin showing alarmed rows after the next poll.
+
+Expected Grafana / Prometheus signal:
+
+- `ot_lab_alarm` becomes `1`.
+- `ot_lab_tank_level_percent` is above 95.
+- Alert rule `OTProcessAlarm` becomes pending, then firing after its `for`
+  duration.
+
+Recover:
+
+```bash
+curl -X POST http://localhost:3000/api/sim/scenario \
+  -H 'Content-Type: application/json' \
+  -d '{"scenario": "normal"}' | jq
+```
+
+### PLC unavailable / HMI connection loss
+
+Stop the simulator:
+
+```bash
+docker compose stop plc-simulator
+```
+
+Expected HMI behavior:
+
+- Within one state poll, the HMI shows `Connection to PLC simulator lost.`
+- The most recent displayed process values remain visible until recovery.
+- The historian may remain reachable, but new rows stop because it cannot
+  poll the simulator.
+
+Expected logs / Grafana / Prometheus signal:
+
+- `docker compose logs historian` shows poll failures.
+- `up{job="plc-simulator"}` becomes `0`.
+- `rate(ot_lab_historian_polls_total{result="error"}[2m])` rises.
+- Alert rules `PLCSimulatorDown` and `HistorianPollErrors` become pending,
+  then firing after their `for` durations.
+
+Recover:
+
+```bash
+docker compose start plc-simulator
+```
+
+### Historian unavailable
+
+Stop only the historian:
+
+```bash
+docker compose stop historian
+```
+
+Expected HMI behavior:
+
+- Live tank values keep updating.
+- The history panel shows `Historian unavailable.` within about 5 seconds.
+
+Expected Grafana / Prometheus signal:
+
+- `up{job="historian"}` becomes `0`.
+- Alert rule `HistorianDown` becomes pending, then firing after its `for`
+  duration.
+- Postgres remains running and existing rows remain available.
+
+Recover:
+
+```bash
+docker compose start historian
+```
+
+### Historian poll errors while service stays up
+
+Stop the simulator while leaving the historian running:
+
+```bash
+docker compose stop plc-simulator
+docker compose logs -f historian
+```
+
+Expected behavior:
+
+- Historian logs repeated poll failures but the container keeps running.
+- `ot_lab_historian_polls_total{result="error"}` increments.
+- Alert rule `HistorianPollErrors` becomes pending, then firing after its
+  `for` duration.
+
+Recover:
+
+```bash
+docker compose start plc-simulator
+```
 
 ## Common issues
 

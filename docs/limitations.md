@@ -25,7 +25,7 @@ Be honest about what it is and is not.
   no attack automation, no scanning utilities, and no instructions for
   compromising real OT systems. It must not be used against real devices.
 
-## Current limitations (Phases 1 – 3)
+## Current limitations (Phases 1-5)
 
 - **Simulator state is still in-memory.** Restarting `plc-simulator` resets
   the tank. The historian persists *readings* over time, but the live
@@ -40,17 +40,16 @@ Be honest about what it is and is not.
 - **Default Postgres password (`change_me`).** Fine for a local lab; would
   obviously need to change for anything else. The host port for Postgres is
   intentionally not published.
-- **No network segmentation.** All four services share a single default
-  Docker network. The DMZ / OT / monitoring zone model is introduced in
-  Phase 4.
 - **Anonymous Grafana access is intentional for the local lab.** Anyone
   who can reach `:3001` can view all dashboards without authentication.
   This is convenient for a teaching demo and would be unacceptable on any
   network-exposed deployment. Editing still requires the admin password.
 - **`/metrics` endpoints are unauthenticated.** Fine on the internal
   Docker network; do not expose them on a real network.
-- **No alerting.** Prometheus is running without rule files and there is no
-  Alertmanager. Alert routing arrives with Phase 5 (failure scenarios).
+- **Alerting is local and unrouted.** Prometheus loads rule files for the
+  safe failure scenarios, but there is no Alertmanager, paging, email, or
+  external notification path. Alerts are inspected through Grafana or
+  Prometheus APIs from inside the monitoring zone.
 - **Segmentation, not enforcement.** Phase 4 places services on four
   named Docker networks so that non-members cannot resolve or route to
   each other. Containers that **share** a network still have full mutual
@@ -64,6 +63,9 @@ Be honest about what it is and is not.
   It performs no exploitation, no port-range scans, and no enumeration
   beyond declared targets. It will not run against anything outside this
   compose project.
+- **Failure scenarios are simulated controls.** The high-tank scenario is
+  an in-memory simulator shortcut for demos. Docker stop/start scenarios
+  model service unavailability only inside this local lab.
 
 ## Out of scope, permanently
 
