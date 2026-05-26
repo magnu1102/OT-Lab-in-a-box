@@ -44,6 +44,8 @@ docker compose logs -f plc-simulator
 docker compose logs -f historian
 docker compose logs -f postgres
 docker compose logs -f hmi-dashboard
+docker compose logs -f prometheus
+docker compose logs -f grafana
 ```
 
 ## Hit the API from a terminal
@@ -113,6 +115,53 @@ The volume name is `<project>_postgres_data`, where `<project>` is
 docker-compose's slugified project directory name. `docker volume ls` will
 show the exact name.
 
+## Use Grafana and Prometheus
+
+- Grafana: <http://localhost:3001> — opens directly into "OT Lab — Overview"
+  (anonymous Viewer). To edit panels, sign in with the admin credentials
+  from `.env` (default `admin/admin`).
+- Prometheus: <http://localhost:9090>. Useful pages:
+  - `/targets` — should show both `plc-simulator` and `historian` as `UP`.
+  - `/graph` — quick PromQL exploration.
+
+PromQL examples:
+
+```promql
+# Live tank level
+ot_lab_tank_level_percent
+
+# Scrape health for the OT services
+up{job=~"plc-simulator|historian"}
+
+# Historian error rate over 5 minutes
+rate(ot_lab_historian_polls_total{result="error"}[5m])
+
+# Histogram p95 of poll duration
+histogram_quantile(0.95, sum by (le) (rate(ot_lab_historian_poll_duration_seconds_bucket[5m])))
+```
+
+Raw metric scrapes:
+
+```bash
+curl http://localhost:8000/metrics | grep ot_lab_
+docker compose exec historian curl -s http://localhost:8001/metrics | grep ot_lab_historian_
+```
+
+### Editing the provisioned dashboard
+
+The dashboard is `config/grafana/dashboards/ot-lab-overview.json`, mounted
+read-only into the container. To iterate:
+
+1. Sign in to Grafana as admin and edit panels in the UI.
+2. **Save the dashboard** (`Ctrl+S`) — the change is in Grafana's local DB
+   only and will be lost on `docker compose down -v`.
+3. Open *Dashboard settings → JSON Model*, copy the JSON, paste it over
+   `ot-lab-overview.json`, and commit.
+
+The `dashboards.yml` provider re-reads files every 30 seconds, so the next
+`docker compose up` (or `docker compose restart grafana`) will load your
+committed version.
+
 ## Try the connection-loss banner
 
 In one terminal:
@@ -153,6 +202,12 @@ resume on the next poll tick.
 - **Schema didn't get created.** `init.sql` only runs on **first** init of
   the data volume. If you previously ran an empty Postgres on the same
   volume, wipe the volume (see above) and start again.
+- **Grafana panels are empty.** Open <http://localhost:9090/targets> — if
+  either job is `DOWN`, the panel will be empty. If targets are `UP`, the
+  data may simply be too recent (give it ~30s after first boot).
+- **Grafana dashboard shows "Datasource not found".** The provisioning
+  files use the literal UIDs `Prometheus` and `Postgres`. If you renamed a
+  datasource in the UI, restore the originals or update the dashboard JSON.
 
 ## Development outside Docker
 

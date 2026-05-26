@@ -112,13 +112,73 @@ alarm BOOLEAN
 4. Operator clicks toggle the pump via `POST /api/control/pump`; the next
    simulator poll reflects it, and the next historian poll persists it.
 
+## Phase 3 — observability
+
+Phase 3 adds Prometheus and Grafana. Prometheus **observes** the system; it
+never drives it. The simulator and historian each expose `/metrics`;
+Prometheus scrapes both every 5 seconds; Grafana queries Prometheus and
+Postgres to render a pre-provisioned dashboard.
+
+### Scrape topology
+
+```
+prometheus ──GET /metrics──▶ plc-simulator:8000
+prometheus ──GET /metrics──▶ historian:8001
+grafana    ──PromQL────────▶ prometheus:9090
+grafana    ──SQL───────────▶ postgres:5432
+```
+
+### What gets measured
+
+`plc-simulator` (`metrics.update_from_state` runs after each `step()`):
+
+- `ot_lab_tank_level_percent`, `ot_lab_temperature_celsius` — gauges.
+- `ot_lab_pump_running`, `ot_lab_alarm` — 0/1 gauges.
+- `ot_lab_inflow_rate_units_per_second`, `ot_lab_outflow_rate_units_per_second`.
+- `ot_lab_pump_commands_total{result}` — counter.
+- `ot_lab_sim_resets_total` — counter.
+
+`historian`:
+
+- `ot_lab_historian_polls_total{result="success|error"}` — counter.
+- `ot_lab_historian_rows_inserted_total` — counter.
+- `ot_lab_historian_poll_duration_seconds` — histogram.
+- `ot_lab_historian_last_poll_timestamp_seconds` — gauge (unix time).
+- `ot_lab_historian_queries_total{endpoint}` — counter.
+- `ot_lab_historian_db_up` — 0/1 gauge, set by the health probe.
+
+Plus the `prometheus-client` defaults (Python GC, process CPU/RSS, HTTP).
+
+### Two UIs, two audiences
+
+The HMI and Grafana are intentionally separate:
+
+- **HMI dashboard** (`hmi-dashboard:3000`) is the **operator** view: live
+  process values and direct control of the pump. It's optimized for
+  understanding the process *right now*.
+- **Grafana** (`grafana:3001`) is the **engineer/SRE** view: trends over
+  time, scrape health, persisted-row rate, alarm episodes. It's optimized
+  for understanding the *lab itself* and how it behaves.
+
+In a real OT/IT environment these audiences map to different humans, often
+on different networks. The Phase 4 zone model will reflect that.
+
+### Provisioning
+
+Everything Grafana needs ships in `config/grafana/`:
+
+- `provisioning/datasources/datasources.yml` — Prometheus and Postgres,
+  both marked `editable: false` so the on-disk config is authoritative.
+- `provisioning/dashboards/dashboards.yml` — points at
+  `/etc/grafana/dashboards`.
+- `dashboards/ot-lab-overview.json` — the dashboard itself, committed to
+  the repo so it round-trips through git.
+
 ## What changes in later phases
 
-- **Phase 3**: simulator and historian expose `/metrics`; Prometheus scrapes;
-  Grafana dashboards visualize trends from Postgres and Prometheus.
 - **Phase 4**: services are placed on dedicated Docker networks
-  (`corp_net`, `dmz_net`, `ot_net`, `monitoring_net`); direct host
-  exposure of `plc-simulator` is removed.
+  (`corp_net`, `dmz_net`, `ot_net`, `monitoring_net`); convenience host
+  exposures of `plc-simulator:8000` and `prometheus:9090` are removed.
 - **Phase 5**: documented failure scenarios (high-level alarm, simulator
   unavailable, historian unavailable) with expected HMI / log / dashboard
   behaviour.

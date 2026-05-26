@@ -13,7 +13,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import make_asgi_app
 
+from . import metrics
 from .models import (
     HealthResponse,
     ProcessState,
@@ -26,12 +28,14 @@ SIM_TICK_SECONDS = float(os.getenv("SIM_TICK_SECONDS", "0.5"))
 HMI_PORT = os.getenv("HMI_PORT", "3000")
 
 process = WaterTankProcess()
+metrics.update_from_state(process)
 
 
 async def _simulation_loop() -> None:
     while True:
         await asyncio.sleep(SIM_TICK_SECONDS)
         process.step(SIM_TICK_SECONDS)
+        metrics.update_from_state(process)
 
 
 @asynccontextmanager
@@ -60,6 +64,8 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+app.mount("/metrics", make_asgi_app())
 
 
 def _current_state() -> ProcessState:
@@ -92,10 +98,14 @@ def control_pump(command: PumpCommand) -> PumpCommandResponse:
     write to any real PLC or control device.
     """
     process.set_pump(command.running)
+    metrics.update_from_state(process)
+    metrics.PUMP_COMMANDS_TOTAL.labels(result="ok").inc()
     return PumpCommandResponse(accepted=True, state=_current_state())
 
 
 @app.post("/api/sim/reset", response_model=ProcessState)
 def reset_sim() -> ProcessState:
     process.reset()
+    metrics.update_from_state(process)
+    metrics.SIM_RESETS_TOTAL.inc()
     return _current_state()

@@ -25,7 +25,7 @@ Be honest about what it is and is not.
   no attack automation, no scanning utilities, and no instructions for
   compromising real OT systems. It must not be used against real devices.
 
-## Current limitations (Phases 1 + 2)
+## Current limitations (Phases 1 – 3)
 
 - **Simulator state is still in-memory.** Restarting `plc-simulator` resets
   the tank. The historian persists *readings* over time, but the live
@@ -43,8 +43,17 @@ Be honest about what it is and is not.
 - **No network segmentation.** All four services share a single default
   Docker network. The DMZ / OT / monitoring zone model is introduced in
   Phase 4.
-- **No monitoring or metrics endpoint.** Phase 3 adds Prometheus-compatible
-  `/metrics` and Grafana dashboards.
+- **Anonymous Grafana access is intentional for the local lab.** Anyone
+  who can reach `:3001` can view all dashboards without authentication.
+  This is convenient for a teaching demo and would be unacceptable on any
+  network-exposed deployment. Editing still requires the admin password.
+- **`/metrics` endpoints are unauthenticated.** Fine on the internal
+  Docker network; do not expose them on a real network.
+- **No alerting.** Prometheus is running without rule files and there is no
+  Alertmanager. Alert routing arrives with Phase 5 (failure scenarios).
+- **Convenience host exposures.** `plc-simulator:8000` and
+  `prometheus:9090` are published to the host for development ergonomics.
+  Phase 4 (zone segmentation) removes both.
 - **Docker networks are not a security boundary.** When zones are added in
   Phase 4, they will model segmentation conceptually — they are not a
   replacement for real firewalls, VLANs, or industrial security architecture.

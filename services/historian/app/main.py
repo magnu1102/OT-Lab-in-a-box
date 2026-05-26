@@ -14,8 +14,9 @@ from typing import Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Response
+from prometheus_client import make_asgi_app
 
-from . import collector, db
+from . import collector, db, metrics
 from .models import HealthResponse, Reading
 
 logging.basicConfig(
@@ -47,12 +48,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.mount("/metrics", make_asgi_app())
+
 
 @app.get("/health", response_model=HealthResponse)
 def health(response: Response) -> HealthResponse:
-    if not db.ping():
+    db_ok = db.ping()
+    metrics.DB_UP.set(1.0 if db_ok else 0.0)
+    if not db_ok:
         response.status_code = 503
-    return HealthResponse(status="ok" if response.status_code != 503 else "degraded")
+    return HealthResponse(status="ok" if db_ok else "degraded")
 
 
 @app.get("/api/history/readings", response_model=list[Reading])
@@ -60,6 +65,7 @@ def get_readings(
     limit: int = Query(100, ge=1, le=1000),
     since: Optional[datetime] = Query(None, description="ISO-8601 timestamp; only newer rows returned."),
 ) -> list[Reading]:
+    metrics.QUERIES_TOTAL.labels(endpoint="readings").inc()
     try:
         return db.fetch_readings(limit=limit, since=since)
     except Exception as err:

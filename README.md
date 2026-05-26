@@ -11,44 +11,74 @@ concepts. The project is **educational and defensive only**.
 
 ## Status
 
-**Phase 2** — persistence layer added. Readings from the simulator are now
-polled and stored in PostgreSQL by a `historian` service, and the HMI shows
-the most recent rows.
+**Phase 3** — monitoring stack added. Prometheus scrapes `/metrics` from
+the simulator and historian; Grafana serves a pre-provisioned dashboard
+fed by Prometheus and Postgres.
 
-The full roadmap (Prometheus/Grafana, network zone segmentation, threat
-model, failure scenarios) is tracked in
+The full roadmap (network zone segmentation, failure scenarios, portfolio
+polish) is tracked in
 [`ot_lab_in_a_box_project_plan.md`](ot_lab_in_a_box_project_plan.md).
 
 ## What's built
 
 ```
-┌─────────┐    ┌──────────────────┐    ┌────────────────┐    ┌────────────┐
-│ Browser │───▶│  hmi-dashboard   │───▶│ plc-simulator  │◀───│ historian  │
-│         │    │ (nginx + React)  │    │  (FastAPI)     │    │ (FastAPI,  │
-└─────────┘    │       :3000      │    │      :8000     │    │   poll)    │
-               └────────┬─────────┘    └────────────────┘    └─────┬──────┘
-                        │  /api/history/*                          │
-                        └──────────────────────────────────────────┤
-                                                                   ▼
-                                                          ┌────────────────┐
-                                                          │   postgres     │
-                                                          │ (process_readings)
-                                                          └────────────────┘
+                  ┌───────────────────┐
+                  │      Browser      │
+                  └───┬───────────┬───┘
+                      │           │
+              :3000   │           │   :3001
+                      ▼           ▼
+            ┌─────────────────┐  ┌─────────────────┐
+            │  hmi-dashboard  │  │     grafana     │
+            │ (nginx + React) │  │  (provisioned)  │
+            └───┬─────────────┘  └───┬─────────────┘
+                │  /api/*            │
+                ▼                    ▼
+    ┌─────────────────┐   ┌─────────────────┐
+    │  plc-simulator  │◀──│   prometheus    │──▶ /metrics on both
+    │    (FastAPI)    │   │    scrapes      │     plc-simulator
+    │      :8000      │   │      :9090      │     and historian
+    └────────┬────────┘   └────────┬────────┘
+             │ poll                │
+             ▼                     ▼
+    ┌─────────────────┐   ┌─────────────────┐
+    │    historian    │──▶│    postgres     │◀── grafana (Postgres
+    │   (FastAPI +    │   │ process_readings│      datasource)
+    │   asyncio)      │   │ (named volume)  │
+    └─────────────────┘   └─────────────────┘
 ```
 
 - **`plc-simulator`** — Python + FastAPI service simulating a water tank
   (level, pump state, inflow/outflow, temperature, alarm). Updates state in
-  the background and exposes a JSON API.
+  the background and exposes a JSON API plus `/metrics`.
 - **`historian`** — Python + FastAPI worker that polls `plc-simulator` every
   2 seconds and writes each reading to PostgreSQL. Exposes a read-back API
-  (`/api/history/readings`). Survives simulator and DB outages without
-  crashing.
+  (`/api/history/readings`) and `/metrics`. Survives simulator and DB
+  outages without crashing.
 - **`postgres`** — PostgreSQL 16 with the `process_readings` table created
   on first boot via `config/postgres/init.sql`. Data lives in the named
   volume `postgres_data`. Port is intentionally not published.
 - **`hmi-dashboard`** — React + TypeScript dashboard, built with Vite and
-  served by nginx. Polls the simulator every 2 seconds, polls the historian
-  every 5 seconds for recent readings, and supports pump on/off and reset.
+  served by nginx. Operator-facing UI: pump on/off, reset, live values,
+  recent readings.
+- **`prometheus`** — Scrapes `/metrics` from the simulator and historian
+  every 5 seconds. 7-day retention in the `prometheus_data` volume.
+- **`grafana`** — Pre-provisioned dashboard (Prometheus + Postgres
+  datasources). Engineer-facing UI for trends and scrape health. Anonymous
+  Viewer is enabled for the local lab; admin login still works for editing.
+
+### Ports
+
+| Service        | Host port | Purpose                              |
+|----------------|-----------|--------------------------------------|
+| hmi-dashboard  | 3000      | Operator UI                          |
+| grafana        | 3001      | Engineer dashboards (no login)       |
+| plc-simulator  | 8000      | Simulator API (convenience exposure) |
+| prometheus     | 9090      | PromQL queries (convenience exposure)|
+
+`postgres` (5432) and `historian` (8001) are intentionally **not**
+published — reach them through `docker compose exec` or via the HMI's
+nginx proxy / Grafana's Postgres datasource.
 
 ## Quick start
 
@@ -87,8 +117,12 @@ fast.
 
 When the logs settle, open:
 
-- **HMI dashboard:** <http://localhost:3000>
+- **HMI dashboard (operator):** <http://localhost:3000>
+- **Grafana (engineer):** <http://localhost:3001> — opens directly into the
+  "OT Lab — Overview" dashboard, no login required.
+- Prometheus: <http://localhost:9090/targets>
 - Simulator API: <http://localhost:8000/api/state>
+- Simulator metrics: <http://localhost:8000/metrics>
 - Simulator health: <http://localhost:8000/health>
 - Persisted readings: <http://localhost:3000/api/history/readings?limit=5>
 
@@ -125,7 +159,9 @@ directly on `:8000` for convenience.
 | GET    | `/api/state`                  | plc-simulator   | Current process state (JSON)          |
 | POST   | `/api/control/pump`           | plc-simulator   | `{"running": bool}` — toggle the pump |
 | POST   | `/api/sim/reset`              | plc-simulator   | Re-initialize the simulation          |
+| GET    | `/metrics`                    | plc-simulator   | Prometheus exposition (process gauges, command counters) |
 | GET    | `/api/history/readings`       | historian       | Recent persisted readings (newest first). Query params: `limit` (1–1000, default 100), `since` (ISO-8601). |
+| GET    | `/metrics` (on `:8001`)       | historian       | Prometheus exposition (poll counters, query counts, DB up) |
 
 Example `GET /api/state`:
 
@@ -151,12 +187,11 @@ Example `GET /api/state`:
 
 Subsequent phases (from the project plan):
 
-1. Prometheus + Grafana monitoring.
-2. Multiple Docker networks for IT/DMZ/OT/monitoring zones, allowed-traffic
+1. Multiple Docker networks for IT/DMZ/OT/monitoring zones, allowed-traffic
    matrix, architecture diagrams.
-3. Safe failure scenarios (high-level alarm, simulator unavailable, historian
+2. Safe failure scenarios (high-level alarm, simulator unavailable, historian
    unavailable).
-4. Portfolio polish.
+3. Portfolio polish.
 
 ## Development notes
 
