@@ -4,6 +4,11 @@ A fully local, Docker-based simulated operational technology (OT) environment
 for learning infrastructure design, process monitoring, and OT/IT segmentation
 concepts. The project is **educational and defensive only**.
 
+A simulated water-tank PLC, an operator HMI, a historian backed by
+PostgreSQL, and a Prometheus + Grafana monitoring stack run side by side
+across four segmented Docker networks. Everything starts with one
+`docker compose up`.
+
 > This lab is a simulated OT environment for learning infrastructure design,
 > monitoring, and segmentation concepts. It does not target real devices and
 > should not be connected to production networks. The project is defensive
@@ -22,6 +27,23 @@ startup. The HMI and Grafana are the only host-published services.
 
 The full roadmap is tracked in
 [`ot_lab_in_a_box_project_plan.md`](ot_lab_in_a_box_project_plan.md).
+
+## Tech stack
+
+- **Containers & orchestration:** Docker, Docker Compose v2, four named
+  bridge networks (`corp_net`, `dmz_net`, `ot_net`, `monitoring_net`).
+- **Process simulator & historian:** Python 3.12, FastAPI, Uvicorn,
+  Pydantic v2, `psycopg` 3 (PostgreSQL driver), `httpx`,
+  `prometheus-client`.
+- **Database:** PostgreSQL 16 (Alpine image), schema bootstrapped from
+  `config/postgres/init.sql`.
+- **Operator UI (HMI):** React 18, TypeScript, Vite, served in production
+  by nginx that proxies API traffic into the OT zone.
+- **Observability:** Prometheus (scrapes + alert rules), Grafana 11 with
+  provisioned datasources and a pre-built dashboard.
+- **Segmentation self-test:** Alpine + Bash container (`corporate-client`).
+- **CI & validation:** GitHub Actions, `pytest`, a portable Bash smoke
+  test (`scripts/smoke-test.sh`).
 
 ## What this demonstrates
 
@@ -232,6 +254,67 @@ docker compose down -v
 More commands — inspecting Postgres, simulating outages, dev-without-Docker —
 are in [`docs/runbook.md`](docs/runbook.md).
 
+## Testing and validation
+
+Three layers, increasing in scope:
+
+### 1. Unit tests (PLC simulator)
+
+`services/plc-simulator/tests/` contains `pytest` tests for the water-tank
+state machine and the scenario API.
+
+```bash
+cd services/plc-simulator
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+python -m pytest tests -q
+```
+
+### 2. Configuration validation
+
+Verifies that `docker-compose.yml` and the Prometheus configuration parse
+correctly. These run in CI and are safe to run locally without starting
+the lab:
+
+```bash
+docker compose config --quiet
+docker run --rm \
+  -v "$(pwd)/config/prometheus":/etc/prometheus \
+  prom/prometheus:v2.55.1 \
+  promtool check config /etc/prometheus/prometheus.yml
+```
+
+### 3. End-to-end smoke test
+
+`scripts/smoke-test.sh` exercises the running lab: HMI reachable, process
+state JSON well-formed, scenario endpoints toggle the alarm, historian
+returns persisted readings, Prometheus exposes the Phase 5 alert rules,
+the `corporate-client` segmentation self-test passes, and Grafana
+responds. The script resets the simulator to the normal scenario when it
+exits.
+
+```bash
+docker compose up -d --build      # if not already running
+./scripts/smoke-test.sh
+```
+
+### Continuous integration
+
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml))
+runs three jobs on every push and pull request: HMI build, PLC simulator
+tests, and Docker Compose + Prometheus configuration validation.
+
+### Manual validation checklist
+
+When poking at the lab by hand, the things worth confirming are:
+
+- `docker compose ps` shows every service `healthy` or `running`.
+- The HMI loads at <http://localhost:3000> and live values update.
+- The Grafana dashboard at <http://localhost:3001> populates within ~30 s.
+- `docker compose logs corporate-client` shows `[PASS] UNREACHABLE` on
+  every probe.
+- `docker compose logs -f historian` shows successful polls.
+
 ## API summary
 
 All endpoints are reachable from the host **only** through the HMI's
@@ -273,6 +356,10 @@ Example `GET /api/state`:
 - [`docs/allowed-traffic-matrix.md`](docs/allowed-traffic-matrix.md) — every allowed and forbidden edge.
 - [`docs/runbook.md`](docs/runbook.md) — running, inspecting, troubleshooting.
 - [`docs/limitations.md`](docs/limitations.md) — what this lab is and is not.
+
+## License
+
+Released under the [MIT License](LICENSE).
 
 ## Roadmap
 
